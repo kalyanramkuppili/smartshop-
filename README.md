@@ -52,6 +52,11 @@ eas build -p android --profile preview
 
 ## 📸 Screenshots
 
+<img width="2940" height="1678" alt="ss1" src="https://github.com/user-attachments/assets/72eeebb9-cc95-4324-913d-607e69a0360e" />
+
+<img width="2940" height="1678" alt="ss2" src="https://github.com/user-attachments/assets/4fca7ee5-1f33-44eb-af89-a7754e7af519" />
+
+<img width="2940" height="1678" alt="ss3" src="https://github.com/user-attachments/assets/af1b8c87-82b3-4331-852c-79f527164437" />
 
 <img width="2940" height="1678" alt="ss4 sh" src="https://github.com/user-attachments/assets/6c026563-5c1e-4798-819e-5be7d6b296c9" />
 
