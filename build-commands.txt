@@ -1,0 +1,264 @@
+# smartSHOP - Build Commands
+# ===========================
+
+# Navigate to project directory
+cd /Users/abhinavkanchustambham/Desktop/programing/smartCART
+
+# Build APK (Android) via EAS
+eas build --platform android --profile preview --non-interactive
+
+# Start local web preview
+npx expo start --web --port 8081
+
+# Start local development (iOS/Android simulator)
+npx expo start
+
+# Install latest APK on connected Android device (after download)
+# adb install <path-to-apk>
+
+# Check EAS build status
+eas build:list
+
+# Login to EAS (if needed)
+eas login
+
+
+# ============================================================
+# API DETAILS & USAGE LIMITS
+# ============================================================
+
+# ── 1. GROQ API ─────────────────────────────────────────────
+# Purpose    : AI product recommendations & price estimation
+# Model used : llama-3.1-8b-instant
+# Dashboard  : https://console.groq.com/keys
+#
+# FREE TIER LIMITS (per minute / per day):
+#   - Requests per minute (RPM)     : 30
+#   - Tokens per minute (TPM)       : 131,072
+#   - Requests per day (RPD)        : 14,400
+#   - Tokens per day (TPD)          : 500,000
+#
+# PER REQUEST (smartSHOP usage):
+#   - System prompt tokens          : ~320 tokens (fixed)
+#   - User query tokens             : ~20–40 tokens (e.g. "Search for fans under 3000")
+#   - AI response tokens            : ~800–2,000 tokens (JSON with 4–6 products)
+#   - max_tokens setting in code    : 2048
+#   - Typical total per search      : ~1,200–2,400 tokens
+#   - Searches per day (free tier)  : ~200–400 searches before hitting daily TPD limit
+#
+# COST : Free forever on free tier. No credit card needed.
+
+
+# ── 2. SERP API ─────────────────────────────────────────────
+# Purpose    : Fetch real product images, direct store URLs,
+#              prices from Google Shopping & Amazon search
+# Dashboard  : https://serpapi.com/manage-api-key
+#
+# FREE TIER LIMITS:
+#   - Searches per month            : 100
+#   - Searches per second           : 1
+#   - Results per search            : up to 100 results
+#   - No daily limit (only monthly)
+#
+# PER APP ACTION (smartSHOP usage):
+#   Each product search triggers multiple SerpAPI calls:
+#   - 1 Google Shopping search      → product list + images + prices
+#   - 1 per store for direct links  → searchDirectProductLink() × 2–4 stores
+#   - Total per user search         : ~3–5 SerpAPI calls
+#   - At 100/month free tier        : ~20–33 full product searches per month
+#
+# ACTIVE KEYS in config/index.ts:
+#   Abhinav : a2765f... (currently active)
+#   Kalyan  : 1f230c... (exhausted - 100/month used)
+#   Ganga   : 4dc5fe... (backup)
+#
+# PAID PLANS : $50/month → 5,000 searches | $130/month → 15,000 searches
+# Sign up    : https://serpapi.com/
+
+
+# ── 3. ZENROWS API ──────────────────────────────────────────
+# Purpose    : Web scraping proxy — fetches live prices from
+#              Amazon.in and Flipkart by bypassing bot detection
+# Dashboard  : https://app.zenrows.com/
+#
+# FREE TIER LIMITS:
+#   - Credits per month             : 1,000
+#   - Concurrent requests           : 1
+#
+# CREDIT COST PER REQUEST:
+#   - Standard proxy (no JS)        : 1 credit
+#   - Premium proxy (Amazon)        : 5 credits  ← used for Amazon
+#   - JS rendering (Flipkart)       : 5 credits  ← used for Flipkart
+#   - Premium proxy + JS render     : 25 credits (NOT used — breaks Amazon)
+#
+# PER APP ACTION (smartSHOP usage):
+#   Each product card that has Amazon + Flipkart URLs costs:
+#   - Amazon scrape (premium proxy) : 5 credits
+#   - Flipkart scrape (JS render)   : 5 credits
+#   - Total per product             : 10 credits
+#   - Products scraped/month (free) : ~100 products (1,000 ÷ 10)
+#   - Typical response time         : 30–60 seconds (Amazon ~50s)
+#
+# ACTIVE KEY : 91369a3959964c75b0e7f4db8b10f40323e45f54
+#
+# PAID PLANS : $49/month → 250,000 credits | $99/month → 1M credits
+# Sign up    : https://www.zenrows.com/
+
+
+# ── SUMMARY TABLE ───────────────────────────────────────────
+#
+#  API       | Free Limit          | Cost per Request  | Resets
+#  ----------+---------------------+-------------------+--------
+#  Groq      | 500K tokens/day     | ~1,200–2,400 tok  | Daily
+#  SerpAPI   | 100 searches/month  | 3–5 searches/query| Monthly
+#  ZenRows   | 1,000 credits/month | 10 credits/product| Monthly
+#
+# ============================================================
+
+
+# ============================================================
+# KEY POINTS — REVIEWER Q&A
+# ============================================================
+
+# ── WHAT IS THIS APP? ────────────────────────────────────────
+# smartSHOP is an AI-powered price comparison app for Indian
+# e-commerce. A user types a product query (e.g. "headphones
+# under 3000") and gets a ranked list showing the same product
+# across Amazon, Flipkart, Croma, etc. with real-time prices,
+# direct buy links, and user review summaries.
+
+
+# ── HOW DOES THE SEARCH PIPELINE WORK? ──────────────────────
+# Every search goes through a 3-stage pipeline:
+#
+#   Stage 1 — AI (Groq):
+#     User query → Groq llama-3.1-8b-instant → JSON list of
+#     4–6 products with names, categories, estimated prices,
+#     store names, and review summaries. This is the "skeleton"
+#     of the result.
+#
+#   Stage 2 — Enrichment (SerpAPI, runs in parallel with Stage 1):
+#     For each AI product:
+#       - Google Shopping search → real prices per store
+#       - Google site: search    → direct product page URLs
+#       - Amazon/Flipkart search engines → confirmed URLs + prices
+#       - Google Images search  → real product thumbnail
+#       - Google Reviews search → star rating, pros, cons
+#
+#   Stage 3 — Live Prices (ZenRows, mobile only):
+#     Uses ZenRows to send a headless-browser / premium-proxy
+#     request to the actual Amazon or Flipkart product page and
+#     regex-scrapes the current selling price. This is the most
+#     accurate price and overwrites all earlier estimates.
+#     Has a 5-second timeout so it doesn't stall the UI.
+#
+# Price priority (highest → lowest):
+#   ZenRows scraped > Direct store engine > Google Shopping > SerpAPI organic > Groq AI estimate
+
+
+# ── WHY THREE DIFFERENT APIS? ────────────────────────────────
+# Each API solves a different problem the others can't:
+#
+#   Groq    → Natural language understanding. It interprets
+#             vague queries ("good laptop for college") and
+#             knows which products exist, their specs, and which
+#             stores carry them. But its prices are estimates.
+#
+#   SerpAPI → Real-time Google data. It finds direct product
+#             page URLs, actual listed prices, and real images.
+#             But it can't scrape behind paywalls or bot-blocks.
+#
+#   ZenRows → Bypasses bot-detection. Amazon and Flipkart block
+#             regular HTTP requests — ZenRows uses residential
+#             proxies and headless Chromium to get through and
+#             read the live price from the actual product page.
+
+
+# ── WHY IS SERP API DISABLED ON WEB? ────────────────────────
+# Browsers enforce CORS (Cross-Origin Resource Sharing).
+# SerpAPI and ZenRows do not return CORS headers, so calling
+# them directly from a browser tab throws a network error.
+# The app detects Platform.OS === 'web' and skips those calls,
+# falling back to Groq AI estimates + Unsplash images.
+# On Android (APK), there is no CORS restriction — all 3 APIs
+# work fully.
+
+
+# ── HOW DOES BUDGET FILTERING WORK? ─────────────────────────
+# extractBudget() parses the user's query with regex patterns:
+#   "under 30000"  →  budget = 30000
+#   "below ₹50,000" → budget = 50000
+#   "iPhone 15 Pro Max 256GB" → no budget (256 < 1000 and no ₹)
+#
+# The budget is enforced at THREE checkpoints:
+#   1. In the Groq prompt — AI is told not to suggest products above budget
+#   2. Post-Groq filter  — removes any product the AI returned above budget
+#   3. Final filter      — removes stores/products where ZenRows/SerpAPI
+#                          confirmed a real price above budget
+
+
+# ── HOW ARE IMAGES RESOLVED? ────────────────────────────────
+# Image resolution has 4 fallback layers (best to worst):
+#   1. SerpAPI thumbnail from a matched Google Shopping result
+#   2. SerpAPI Google Images search result for the product name
+#   3. Pre-validated Unsplash URL matched by product keyword
+#      (e.g. "headphone" → headphone photo, "fridge" → fridge photo)
+#   4. Category-level Unsplash fallback (e.g. "Audio" → headphones)
+# This ensures no product card ever shows a broken image.
+
+
+# ── HOW ARE URLS VALIDATED? ─────────────────────────────────
+# serpApiService.ts has a SEARCH_PAGE_PATTERNS array of regexes
+# that detect search/category pages (e.g. /search, /category/,
+# /s?, /browse/) and reject them. A store entry is only kept
+# in the final result if its URL points to an actual product
+# page, not a listings page.
+# Note: /\?q=/ was intentionally removed from this list — it
+# was too broad and was rejecting valid product URLs that
+# happen to contain ?q= tracking parameters.
+
+
+# ── WHAT HAPPENS IF AN API FAILS? ────────────────────────────
+# Every external call is wrapped in try/catch or .catch():
+#   - Groq fails       → throws error, app shows "offline data" toast
+#   - SerpAPI fails    → caught per-call; Groq data is used as fallback
+#   - ZenRows times out (5s) → AI/SerpAPI price is used instead
+#   - SerpAPI exhausted → 429 error caught; app falls back gracefully
+# The app never fully crashes — it always shows something.
+
+
+# ── TECH STACK ───────────────────────────────────────────────
+# Framework  : React Native (Expo SDK 54)
+# Language   : TypeScript
+# Navigation : React Navigation (native stack)
+# Animations : React Native Reanimated + Expo Linear Gradient
+# Build      : EAS Build (Expo Application Services)
+# Platform   : Android APK (preview profile) + Web (localhost)
+# State      : useState / useCallback / useEffect (no Redux)
+# APIs       : Groq (AI), SerpAPI (Google), ZenRows (scraping)
+
+
+# ── EAS BUILD DETAILS ────────────────────────────────────────
+# Profile    : preview (generates .apk, not .aab)
+# Platform   : android
+# Bundle ID  : com.smartcart.app
+# EAS slug   : smartcart
+# Account    : abhinavkdv (expo.dev)
+# Keystore   : Build Credentials A7QmMzjFU2 (default, cloud-managed)
+# Last build : fb2ffda0-f7e1-4b0c-991a-313dee759093
+# Build time : ~5–10 min (free tier queue)
+
+
+# ── KNOWN LIMITATIONS ────────────────────────────────────────
+# 1. SerpAPI: only 100 searches/month free — exhausts quickly
+#    with 3–5 calls per user query
+# 2. ZenRows: 30–60 second response time makes live prices slow
+# 3. Groq prices are AI estimates — can be inaccurate for niche
+#    or recently launched products
+# 4. Web platform: SerpAPI + ZenRows disabled (CORS), so only
+#    Groq AI data is shown on web
+# 5. No user accounts or saved searches (stateless app)
+# 6. Images are placeholders on web (Unsplash/placehold.co)
+#    since SerpAPI thumbnails require mobile
+
+# ============================================================

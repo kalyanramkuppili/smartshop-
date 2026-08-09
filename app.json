@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "SmartSHOP",
+    "slug": "smartcart",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a1a2e"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.smartcart.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1a1a2e"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.smartcart.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "groqApiKey": "${GROQ_API_KEY}",
+      "eas": {
+        "projectId": "e21a3ae9-b9d3-4f8d-9885-7813cdbd1c68"
+      }
+    },
+    "owner": "abhinavkdv"
+  }
+}

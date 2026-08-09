@@ -1,0 +1,536 @@
+============================================================
+  smartSHOP — HOW THE APP WORKS (Full Flow)
+  From typing a product to landing on the store page
+============================================================
+
+
+────────────────────────────────────────────────────────────
+EXPO GO — WHAT IS IT AND WHAT ROLE DOES IT PLAY?
+────────────────────────────────────────────────────────────
+
+Expo Go is a free app (available on Play Store / App Store)
+that lets you run your Expo project on a real phone WITHOUT
+building an APK or going through EAS Build.
+
+HOW IT WORKS:
+  1. You run: npx expo start
+  2. Metro Bundler starts on your laptop (port 8081)
+  3. Expo Go on your phone scans the QR code shown in terminal
+  4. Expo Go downloads the JS bundle from your laptop over WiFi
+  5. Your app runs INSIDE the Expo Go container on the phone
+
+Think of Expo Go as a "shell app" that can host any Expo
+project — it provides all the native modules (camera, storage,
+sensors, etc.) so your JS code can run without being compiled
+into a native APK.
+
+EXPO GO vs APK — KEY DIFFERENCES:
+
+  Feature              | Expo Go              | APK (EAS Build)
+  ─────────────────────+──────────────────────+────────────────────
+  Build time needed    | None — instant       | 5–10 minutes
+  Install needed       | Only Expo Go app     | Install the .apk
+  Good for             | Development/testing  | Final demo/release
+  Laptop required      | YES (Metro bundler)  | NO (standalone)
+  Hot reload           | YES (saves instantly)| NO
+  All APIs work        | Mostly yes*          | YES, fully
+  Custom native code   | NO                  | YES
+  Share with others    | Hard (same WiFi)    | Easy (send apk file)
+
+  * SerpAPI and ZenRows still face CORS issues in Expo Go when
+    running in certain modes. The APK has no such restriction.
+
+WHY WE USE EAS BUILD (APK) INSTEAD OF EXPO GO FOR DEMOS:
+  - The APK is standalone — no laptop, no WiFi, no Metro bundler
+  - Reviewers / testers can install it like any Android app
+  - All 3 APIs (Groq, SerpAPI, ZenRows) work without CORS issues
+  - The app looks and behaves exactly like a production app
+  - You can share the APK download link from expo.dev with anyone
+
+WHEN TO USE EXPO GO (during development):
+  - While writing code — see changes in 1 second without rebuilding
+  - To quickly test UI changes on a real device
+  - To test on both Android and iOS at the same time with one command
+
+WHEN TO USE EAS BUILD (APK) (for presentation/demo):
+  - Submitting the project for review
+  - Demonstrating to someone without a dev setup
+  - Testing the full API pipeline (ZenRows + SerpAPI work properly)
+  - Checking final performance and load times
+
+COMMAND COMPARISON:
+  Expo Go (dev):   npx expo start       → scan QR in Expo Go app
+  Web preview:     npx expo start --web → open localhost:8081
+  APK build:       eas build --platform android --profile preview
+
+
+────────────────────────────────────────────────────────────
+STEP 1 — HOME SCREEN (User Opens the App)
+────────────────────────────────────────────────────────────
+
+File: src/screens/HomeScreen.tsx
+
+What the user sees:
+  - Dark gradient background (navy → near-black)
+  - smartSHOP logo (center)
+  - Headline: "Find the Best Deals"
+  - Subtitle: "Compare prices across Amazon, Flipkart & more"
+  - A search bar with placeholder: "Search for any product..."
+  - Feature chips below (AI Picks, Price Comparison, etc.)
+
+Everything fades/slides in sequentially using react-native-reanimated:
+  Logo    → FadeIn  (100ms delay)
+  Text    → FadeIn  (200ms delay)
+  Search  → FadeInDown (300ms delay)
+  Features→ FadeInDown (500ms delay)
+
+User action:
+  User types something like: "headphones under 3000"
+  then presses the Search button (or keyboard submit)
+
+
+────────────────────────────────────────────────────────────
+STEP 2 — NAVIGATION (Home → Results)
+────────────────────────────────────────────────────────────
+
+File: src/screens/HomeScreen.tsx → handleSearch()
+
+When user submits the search:
+  navigation.navigate('Results', { query: 'headphones under 3000' })
+
+React Navigation pushes the Results screen onto the stack and
+passes the query string as a route parameter.
+The Home screen is kept in the stack so the user can go back.
+
+
+────────────────────────────────────────────────────────────
+STEP 3 — RESULTS SCREEN LOADS
+────────────────────────────────────────────────────────────
+
+File: src/screens/ResultsScreen.tsx
+
+On mount, the screen immediately calls:
+  loadProducts(query, 'all')
+
+While loading, the ProductList component renders skeleton
+loading cards (animated shimmer placeholder cards) using
+SkeletonLoader so the user sees something right away.
+
+The screen also shows:
+  - The same search bar (so user can refine the query)
+  - Category chips: All | Mobile | Laptop | Audio | Tablet |
+    Appliances | Beauty | Fashion | Home
+  - API mode indicator: "🤖 Groq AI" or "📦 Mock"
+  - SerpAPI status badge: "🔗 Direct Links" / "Web Mode" / "No SerpAPI"
+  - Debug bar: "Query: ... | Products: ... | Loading: Yes/No"
+
+
+────────────────────────────────────────────────────────────
+STEP 4 — THE SEARCH PIPELINE RUNS (Behind the scenes)
+────────────────────────────────────────────────────────────
+
+File: src/api/combinedSearchService.ts → searchProductsCombined()
+
+This is the core engine. It runs in 3 stages:
+
+  ┌─────────────────────────────────────────────────────┐
+  │  STAGE A + B  (run in PARALLEL — saves ~2 seconds)  │
+  └─────────────────────────────────────────────────────┘
+
+  A) Groq AI call (groqService.ts)
+     ─────────────────────────────
+     Sends to: https://api.groq.com/openai/v1/chat/completions
+     Model:    llama-3.1-8b-instant
+     Prompt:   System prompt (product comparison assistant for India)
+               + User query ("headphones under 3000")
+               + Budget note if detected ("max budget ₹3,000")
+
+     The AI responds with a JSON array like:
+     [
+       {
+         "name": "boAt Rockerz 450",
+         "category": "Audio",
+         "bestPrice": 1299,
+         "stores": [
+           { "name": "Amazon",   "price": 1299, "searchQuery": "boAt Rockerz 450" },
+           { "name": "Flipkart", "price": 1399, "searchQuery": "boAt Rockerz 450" }
+         ],
+         "reviews": { "summary": "...", "pros": [...], "cons": [...] }
+       },
+       ...
+     ]
+
+     Budget check: extractBudget("headphones under 3000") → 3000
+     Any AI product above ₹3000 is removed immediately.
+
+  B) SerpAPI — Google Shopping (serpApiService.ts)
+     ────────────────────────────────────────────
+     Sends to: https://serpapi.com/search?engine=google_shopping
+     Returns:  List of real product listings from Google
+               Each has: title, price, store name, thumbnail URL
+     NOTE: Skipped on web (CORS restriction). Mobile only.
+
+
+  ┌─────────────────────────────────────────────────────┐
+  │  STAGE C — Enrich each product (run in parallel)   │
+  └─────────────────────────────────────────────────────┘
+
+  For EACH product from Groq AI, 4 things happen in parallel:
+
+  C1) IMAGE RESOLUTION
+      Priority order:
+        1. SerpAPI Google Shopping thumbnail (matched by title keywords)
+        2. SerpAPI Google Images search for the product name
+        3. Pre-validated Unsplash URL by product keyword
+           (e.g. "headphone" → headphone photo from Unsplash)
+        4. Category-level Unsplash fallback (e.g. "Audio" → headphones)
+      → Guarantees no broken image ever appears
+
+  C2) DIRECT STORE URLS (searchDirectProductLinks)
+      Sends to SerpAPI: Google "site:amazon.in boAt Rockerz 450"
+      Returns the first URL that is NOT a search/category page.
+      URL validation uses SEARCH_PAGE_PATTERNS regexes to reject:
+        /search, /category/, /s?, /browse/, /b?node, etc.
+      Falls back to Google Shopping link if no direct page found.
+
+  C3) REAL PRICES (searchRealPrices + searchAmazonAndFlipkart)
+      - Google Shopping search scoped per store
+      - Amazon product search engine (engine=amazon)
+      - Flipkart product search engine (engine=google_shopping)
+      Returns confirmed prices with direct buy URLs.
+
+  C4) GOOGLE REVIEWS (searchProductReviews)
+      Sends to SerpAPI: Google search for "[product name] reviews"
+      Extracts: star rating, review count, pros, cons, summary
+      Falls back to Groq AI review summary if Google returns nothing.
+
+
+  ┌─────────────────────────────────────────────────────┐
+  │  STAGE D — ZenRows live price scraping (parallel)  │
+  │  Runs at the same time as reviews (C4 above)       │
+  └─────────────────────────────────────────────────────┘
+
+  File: src/api/zenrowsService.ts
+
+  For each product that has an Amazon or Flipkart URL:
+    - Sends the URL to ZenRows proxy API
+    - ZenRows fetches the actual product page using:
+        Amazon   → Premium residential proxy (no JS render)
+        Flipkart → Headless Chromium browser (JS render needed
+                   because Flipkart is a React SPA)
+    - Regex-scans the returned HTML for the live selling price
+    - Has a hard 5-second timeout to avoid blocking the UI
+
+  ZenRows price OVERRIDES all earlier estimates (highest confidence).
+
+  PRICE PRIORITY (final resolution order):
+    1. ZenRows live-scraped price    ← most accurate
+    2. Amazon/Flipkart engine price  ← confirmed listing
+    3. Google Shopping price         ← real but may lag
+    4. SerpAPI organic result price  ← secondary source
+    5. Groq AI estimate              ← fallback if all else fails
+
+
+  ┌─────────────────────────────────────────────────────┐
+  │  FINAL BUDGET FILTER                               │
+  └─────────────────────────────────────────────────────┘
+  After all real prices are resolved, another filter removes
+  any store or product whose confirmed real price is above
+  the user's stated budget. This catches cases where ZenRows
+  found a higher actual price than what Groq estimated.
+
+
+────────────────────────────────────────────────────────────
+STEP 5 — PRODUCT CARDS RENDER
+────────────────────────────────────────────────────────────
+
+File: src/components/ProductCard.tsx
+File: src/components/ProductList.tsx
+
+Products render in a 2-column grid.
+Each card has a FRONT side and a BACK side (3D flip animation).
+
+FRONT SIDE (default view):
+  ┌──────────────────────┐
+  │  [Product Image]     │ ← 90px tall, from SerpAPI or Unsplash
+  │  [Category Badge]    │ ← e.g. "Audio"
+  ├──────────────────────┤
+  │  boAt Rockerz 450    │ ← product name
+  │                      │
+  │ [BEST] Amazon  ₹1,299│ ← green row, tappable → opens Amazon
+  │        Flipkart ₹1,399│ ← lime row, tappable → opens Flipkart
+  │        Croma   ₹1,499│ ← yellow row, tappable → opens Croma
+  │                      │
+  │    [★ Reviews]       │ ← button to flip card
+  └──────────────────────┘
+
+BACK SIDE (after tapping "★ Reviews"):
+  ┌──────────────────────┐
+  │  boAt Rockerz 450    │
+  │  [🔍 Google Reviews] │ ← or [🤖 AI Summary] if no Google data
+  │     ⭕ 4.3 / 5       │ ← RatingCircle component
+  │  "Great sound for    │
+  │   the price..."      │ ← review summary (2 lines max)
+  │  ✓ Pros              │
+  │    • Good bass       │
+  │    • Comfortable fit │
+  │  ✗ Cons              │
+  │    • Average mic     │
+  │    [← Prices]        │ ← flips back to price view
+  └──────────────────────┘
+
+Card appears with FadeIn animation, each card staggered by 100ms
+(index × 100ms delay) so they cascade in one by one.
+
+
+────────────────────────────────────────────────────────────
+STEP 6 — USER TAPS A STORE ROW (Redirect to Product Page)
+────────────────────────────────────────────────────────────
+
+File: src/components/ProductCard.tsx → openStoreUrl()
+
+When user taps e.g. the "Amazon" row on the front of the card:
+  openStoreUrl(store.url) is called
+
+  store.url is resolved in this priority order:
+    1. Direct product page from Amazon/Flipkart engine
+       e.g. https://www.amazon.in/dp/B08CF3B7N1
+    2. Direct product page from Google site: search
+       e.g. https://www.flipkart.com/boat-rockerz-450/p/itm...
+    3. Google Shopping product link
+    4. Google Shopping search page (last resort)
+       e.g. https://www.google.com/search?q=boAt+Rockerz+450+site:amazon.in&tbm=shop
+
+  The function calls React Native's Linking.openURL(url)
+  → On Android: opens the URL in the default browser (Chrome)
+  → If Amazon/Flipkart app is installed: may deep-link into the app
+  → The user lands directly on the product page and can buy
+
+
+────────────────────────────────────────────────────────────
+STEP 7 — SEARCH REFINEMENT (Optional)
+────────────────────────────────────────────────────────────
+
+From the Results screen the user can:
+
+  A) Type a new query in the search bar
+     → handleSearch() updates searchQuery state
+     → useEffect re-triggers loadProducts() with new query
+     → Full pipeline runs again
+
+  B) Tap a category chip (e.g. "Mobile")
+     → selectedCategory state updates to "mobile"
+     → Results are filtered to that category only
+     → If using API: full pipeline runs again with category filter
+     → If using mock: local filter applied
+
+  C) Toggle "🤖 Groq AI" / "📦 Mock" button
+     → Switches between live API search and hardcoded demo data
+     → Useful for offline testing or when APIs are exhausted
+
+
+────────────────────────────────────────────────────────────
+FULL FLOW DIAGRAM (Text Version)
+────────────────────────────────────────────────────────────
+
+  User opens app
+       │
+       ▼
+  HOME SCREEN
+  [Search Bar] ← user types "headphones under 3000"
+       │
+       ▼ navigation.navigate('Results', { query })
+       │
+  RESULTS SCREEN
+  Shows skeleton loaders
+       │
+       ├──────────────────────────────────────────────┐
+       │  PARALLEL                                    │
+       ▼                                              ▼
+  Groq AI (llama-3.1-8b)                     SerpAPI Google Shopping
+  Returns 4-6 products                       Returns real listings
+  with AI-estimated prices                   with thumbnails + prices
+       │                                              │
+       └──────────────┬───────────────────────────────┘
+                      │ merge + match
+                      ▼
+             For each product (PARALLEL):
+             ├── searchDirectProductLinks()  → real store URLs
+             ├── searchRealPrices()          → real Google Shopping prices
+             ├── searchAmazonAndFlipkart()   → Amazon/Flipkart engine
+             ├── searchProductImage()        → real product photo
+             └── searchProductReviews()      → Google star rating, pros/cons
+                      │
+                      │ (also parallel with reviews)
+                      ▼
+             ZenRows scraping (5s timeout)
+             ├── Amazon → premium proxy → regex → live price
+             └── Flipkart → headless browser → regex → live price
+                      │
+                      ▼
+             PRICE MERGE (ZenRows > engine > Shopping > organic > AI)
+             BUDGET FILTER (remove anything above stated budget)
+             URL VALIDATION (reject search/category pages)
+                      │
+                      ▼
+  PRODUCT CARDS render (2-column grid)
+  ├── FRONT: image, name, store rows (price + → arrow), "★ Reviews"
+  └── BACK:  rating circle, summary, pros, cons, "← Prices"
+                      │
+                      ▼ user taps store row
+  Linking.openURL(store.url)
+                      │
+                      ▼
+  BROWSER OPENS → Amazon / Flipkart / Croma product page
+  User reads listing and buys the product
+
+============================================================
+
+
+============================================================
+  KEY POINTS — REVIEWER Q&A
+============================================================
+
+
+── WHAT IS THIS APP? ───────────────────────────────────────
+smartSHOP is an AI-powered price comparison app for Indian
+e-commerce. A user types a product query (e.g. "headphones
+under 3000") and gets a ranked list showing the same product
+across Amazon, Flipkart, Croma, etc. with real-time prices,
+direct buy links, and user review summaries.
+
+
+── HOW DOES THE SEARCH PIPELINE WORK? ─────────────────────
+Every search goes through a 3-stage pipeline:
+
+  Stage 1 — AI (Groq):
+    User query → Groq llama-3.1-8b-instant → JSON list of
+    4–6 products with names, categories, estimated prices,
+    store names, and review summaries. This is the "skeleton"
+    of the result.
+
+  Stage 2 — Enrichment (SerpAPI, runs in parallel with Stage 1):
+    For each AI product:
+      - Google Shopping search → real prices per store
+      - Google site: search    → direct product page URLs
+      - Amazon/Flipkart search engines → confirmed URLs + prices
+      - Google Images search  → real product thumbnail
+      - Google Reviews search → star rating, pros, cons
+
+  Stage 3 — Live Prices (ZenRows, mobile only):
+    Uses ZenRows to send a headless-browser / premium-proxy
+    request to the actual Amazon or Flipkart product page and
+    regex-scrapes the current selling price. This is the most
+    accurate price and overwrites all earlier estimates.
+    Has a 5-second timeout so it doesn't stall the UI.
+
+Price priority (highest → lowest):
+  ZenRows scraped > Direct store engine > Google Shopping > SerpAPI organic > Groq AI estimate
+
+
+── WHY THREE DIFFERENT APIS? ───────────────────────────────
+Each API solves a different problem the others can't:
+
+  Groq    → Natural language understanding. It interprets
+            vague queries ("good laptop for college") and
+            knows which products exist, their specs, and which
+            stores carry them. But its prices are estimates.
+
+  SerpAPI → Real-time Google data. It finds direct product
+            page URLs, actual listed prices, and real images.
+            But it can't scrape behind paywalls or bot-blocks.
+
+  ZenRows → Bypasses bot-detection. Amazon and Flipkart block
+            regular HTTP requests — ZenRows uses residential
+            proxies and headless Chromium to get through and
+            read the live price from the actual product page.
+
+
+── WHY IS SERP API DISABLED ON WEB? ───────────────────────
+Browsers enforce CORS (Cross-Origin Resource Sharing).
+SerpAPI and ZenRows do not return CORS headers, so calling
+them directly from a browser tab throws a network error.
+The app detects Platform.OS === 'web' and skips those calls,
+falling back to Groq AI estimates + Unsplash images.
+On Android (APK), there is no CORS restriction — all 3 APIs
+work fully.
+
+
+── HOW DOES BUDGET FILTERING WORK? ────────────────────────
+extractBudget() parses the user's query with regex patterns:
+  "under 30000"   →  budget = 30000
+  "below ₹50,000" →  budget = 50000
+  "iPhone 15 Pro Max 256GB" → no budget (256 < 1000 and no ₹)
+
+The budget is enforced at THREE checkpoints:
+  1. In the Groq prompt — AI is told not to suggest products above budget
+  2. Post-Groq filter  — removes any product the AI returned above budget
+  3. Final filter      — removes stores/products where ZenRows/SerpAPI
+                         confirmed a real price above budget
+
+
+── HOW ARE IMAGES RESOLVED? ────────────────────────────────
+Image resolution has 4 fallback layers (best to worst):
+  1. SerpAPI thumbnail from a matched Google Shopping result
+  2. SerpAPI Google Images search result for the product name
+  3. Pre-validated Unsplash URL matched by product keyword
+     (e.g. "headphone" → headphone photo, "fridge" → fridge photo)
+  4. Category-level Unsplash fallback (e.g. "Audio" → headphones)
+This ensures no product card ever shows a broken image.
+
+
+── HOW ARE URLS VALIDATED? ─────────────────────────────────
+serpApiService.ts has a SEARCH_PAGE_PATTERNS array of regexes
+that detect search/category pages (e.g. /search, /category/,
+/s?, /browse/) and reject them. A store entry is only kept
+in the final result if its URL points to an actual product
+page, not a listings page.
+Note: /\?q=/ was intentionally removed from this list — it
+was too broad and was rejecting valid product URLs that
+happen to contain ?q= tracking parameters.
+
+
+── WHAT HAPPENS IF AN API FAILS? ───────────────────────────
+Every external call is wrapped in try/catch or .catch():
+  - Groq fails        → throws error, app shows "offline data" toast
+  - SerpAPI fails     → caught per-call; Groq data is used as fallback
+  - ZenRows times out (5s) → AI/SerpAPI price is used instead
+  - SerpAPI exhausted → 429 error caught; app falls back gracefully
+The app never fully crashes — it always shows something.
+
+
+── TECH STACK ───────────────────────────────────────────────
+Framework  : React Native (Expo SDK 54)
+Language   : TypeScript
+Navigation : React Navigation (native stack)
+Animations : React Native Reanimated + Expo Linear Gradient
+Build      : EAS Build (Expo Application Services)
+Platform   : Android APK (preview profile) + Web (localhost)
+State      : useState / useCallback / useEffect (no Redux)
+APIs       : Groq (AI), SerpAPI (Google), ZenRows (scraping)
+
+
+── EAS BUILD DETAILS ────────────────────────────────────────
+Profile    : preview (generates .apk, not .aab)
+Platform   : android
+Bundle ID  : com.smartcart.app
+EAS slug   : smartcart
+Account    : abhinavkdv (expo.dev)
+Keystore   : Build Credentials A7QmMzjFU2 (default, cloud-managed)
+Last build : fb2ffda0-f7e1-4b0c-991a-313dee759093
+Build time : ~5–10 min (free tier queue)
+
+
+── KNOWN LIMITATIONS ────────────────────────────────────────
+1. SerpAPI: only 100 searches/month free — exhausts quickly
+   with 3–5 calls per user query
+2. ZenRows: 30–60 second response time makes live prices slow
+3. Groq prices are AI estimates — can be inaccurate for niche
+   or recently launched products
+4. Web platform: SerpAPI + ZenRows disabled (CORS), so only
+   Groq AI data is shown on web
+5. No user accounts or saved searches (stateless app)
+6. Images are placeholders on web (Unsplash/placehold.co)
+   since SerpAPI thumbnails require mobile
+
+============================================================
